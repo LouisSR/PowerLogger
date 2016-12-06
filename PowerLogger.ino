@@ -21,13 +21,13 @@ TODO:
 #include <SD.h>
 #include "Clock.h"
 
-//Global variabless
-const int chipSelect = 10; // for SD through SPI, we use digital pin 10 for the SD cs line
+//Global variables
+const byte cardDetect = 1; // for SD through SPI, we use digital pin 10 for the SD cs line
+const byte record_pin = 5; //Pushbutton to activate the recording
 const char header[] = "Date, Voltage (mV), Current (mA)";
 
 bool Debug = false; //Debug is true if Serial is connected
-bool recording = true;
-byte record_pin = 1; //Pushbutton to activate the recording
+bool recording = false;
 char daysOfTheWeek[7][12] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
 unsigned long log_interval = 2000; // Time between two measurements in ms
 File logfile; // the logging file
@@ -36,9 +36,10 @@ File logfile; // the logging file
 RTC_PCF8523 rtc;
 Adafruit_INA219 ina219;
 Clock log_clock;
-Clock measure_clock;
-Clock display_clock;
-LiquidCrystal lcd(9, 8, 4, 5, 6, 7);//RS, Enable, D4:7
+Clock measure_clock; //measurement timer
+Clock display_clock; //display timer
+Clock time_clock; //time (hours and minutes) timer
+LiquidCrystal lcd(12, 11, 10, 9, 8, 7);//RS, Enable, D4:7
 
 
 void setup(void)
@@ -49,6 +50,8 @@ void setup(void)
 	// Init LCD
 	lcd.begin(16, 2); //16 Columns, 2 rows
 	lcd.print("PowerLogger");
+	delay(2000);
+	lcd.clear();
 	lcd.setCursor(5, 0); //columns, rows
 	lcd.print("mA");
 	lcd.setCursor(5, 1); //columns, rows
@@ -74,22 +77,23 @@ void setup(void)
 		}
 		while (1);
 	}
+	DisplayTime();
 
 	//Init SD
-	//SD_setup();
+	SD_setup();
 	if(Debug)
 	{
 		ReadTime(); //Prompt user to input time between measurements	
 	}
 
 	//Init INA219
-	//ina219.begin();
+	ina219.begin();
 
 	//Init timers
-	measure_clock.begin(100);
+	measure_clock.begin(200);
 	display_clock.begin(500);
+	time_clock.begin(10000);
 	log_clock.begin(log_interval);
-
 }
 
 /* Initialize SD card, create new log file and save header*/
@@ -102,10 +106,10 @@ void SD_setup(void)
 	}
 	// make sure that the default chip select pin is set to
 	// output, even if you don't use it:
-	pinMode(chipSelect, OUTPUT);
+	pinMode(SS, OUTPUT);
 
 	// see if the card is present and can be initialized:
-	if (!SD.begin(chipSelect)) 
+	if (!SD.begin(SS)) 
 	{
 		Serial.println("SD: Card failed, or not present");
 	}
@@ -157,42 +161,6 @@ void SD_setup(void)
 	}
 }
 
-
-void CheckButton(void)
-{
-	static bool lastButtonState = LOW;
-	bool buttonState = digitalRead(record_pin);
-	if(lastButtonState != buttonState)//Button state has changed
-	{
-		char string_t[7];
-		if(buttonState)//Recording is now on 
-		{
-			recording = true;
-			if(log_interval<1000)//log_interval is shorter than 1s so we display it in milliseconds
-			{
-				sprintf(string_t,"R%3dms",log_interval);
-			}
-			else if(log_interval<60000) //log_interval is shorter than 1min so we display it in seconds
-			{
-				sprintf(string_t,"R%2d.%1ds",log_interval/1000, (log_interval%1000)/100);
-			}
-			else //log_interval is longer than 1min so we display it in minutes
-			{
-				sprintf(string_t,"R%2d.%1dm",log_interval/60000, (log_interval%60000)/6000);
-			}
-			
-		}
-		else // Recording is now off
-		{
-			recording = false;
-			sprintf(string_t,"      ");
-		}
-		lcd.setCursor(10, 0); //columns, rows
-		lcd.print(string_t);
-		lastButtonState = buttonState;
-	}
-}
-
 void loop(void)
 {
 	static int voltage = -18000, current = -1234;
@@ -200,8 +168,8 @@ void loop(void)
 	//Measure current and voltage
 	if(measure_clock.isItTime())
 	{
-		//voltage = ina219.getBusVoltage_mV(); //Voltage in mV
-		//current = ina219.getCurrent_mA(); //Current in mA
+		voltage = ina219.getBusVoltage_mV(); //Voltage in mV
+		current = ina219.getCurrent_mA(); //Current in mA
 		if(Debug)
 		{
 			Serial.print("Voltage: "); Serial.print(voltage); Serial.println(" mV");
@@ -215,13 +183,18 @@ void loop(void)
 		Display(voltage, current);
 	}
 
+	if(time_clock.isItTime())
+	{
+		DisplayTime();
+	}
+
 	//Write to SD card
 	if(recording && log_clock.isItTime())
 	{
 		int data[2];
 		data[0] = voltage;
 		data[1] = current;
-		//WriteToFile(data, 2);
+		WriteToFile(data, 2);
 	}
 	CheckButton();
 	delay(100);
@@ -266,40 +239,115 @@ void WriteToFile(int* data, byte data_length)
 	logfile.flush();
 }
 
+//Display time
+void DisplayTime()
+{
+	char string_t[6]; // sign +  5 digits + \0 char
+	DateTime now;
+	
+	now = rtc.now(); // fetch the time
+	
+	sprintf(string_t, "%02d:%02d", now.hour(),	now.minute() );
+
+	lcd.setCursor(11, 0);
+	lcd.print(string_t);
+}
+
 //Ask user to enter time between measurements
 void ReadTime(void)
 {
 	unsigned int start_time;
 	Serial.print("Enter time in ms bewteen two logs: ");
 	start_time = millis();
-	while(Serial.available()==0 && ( millis()-start_time<2000 )); //Timeout 2s
+	while(Serial.available()==0 && ( millis()-start_time<5000 )); //Timeout 5s
 	if(Serial.available()>0)
 	{
-		log_interval = Serial.read();
+		log_interval = Serial.parseInt();
 	}
 	Serial.print(log_interval);
 	Serial.println("ms");
 }
 
+//Display measurements
 void Display(int voltage, int current)
 {
 	char string_t[7]; // sign +  5 digits + \0 char
 	
 	//Display current
-	sprintf(string_t, "% 5d", current);
-	lcd.setCursor(0, 0); //columns, rows
-	lcd.print(string_t);
+	if(current >= 10000 || current <= -10000) // value is too long to print
+	{
+		lcd.setCursor(0, 0); //columns, rows
+		//lcd.print("     "); 
+		sprintf(string_t, "     ");
+	}
+	else
+	{
+		sprintf(string_t, "% 5d", current);
+		lcd.setCursor(0, 0); //columns, rows
+		lcd.print(string_t);
+	}
+
 	if(Debug)
 	{
 		Serial.print(string_t); Serial.println("mA");
 	}
 	
 	//Display voltage
+	if(voltage >= 10000 || voltage <= -10000) // value is too long to print
+	{
+		lcd.setCursor(0, 1); //columns, rows
+		lcd.print("     "); 
+	}
+	else
+	{
 	sprintf(string_t, "% 2d.%1d", voltage/1000, (abs(voltage)%1000)/100); //sprintf on Arduino does not support float number
 	lcd.setCursor(0, 1); //columns, rows
 	lcd.print(string_t);
+	}
+
 	if(Debug)
 	{
 		Serial.print(string_t); Serial.println("V");
 	}
+
+}
+
+//Read button. If pressed, toggle recording state
+void CheckButton(void)
+{
+	static bool lastButtonState = HIGH;
+	bool buttonState = digitalRead(record_pin);
+	if(lastButtonState == LOW && buttonState == HIGH)//Low to High transistion
+	{
+		char string_t[9];
+
+		recording = !recording; //toggle recording state
+
+		if(recording)//Recording is now on 
+		{
+			if(log_interval<1000)//log_interval is shorter than 1s so we display it in milliseconds
+			{
+				sprintf(string_t,"REC%3dms",log_interval);
+			}
+			else //log_interval is longer than 1s so we display it in seconds
+			{
+				sprintf(string_t," REC%3ds",log_interval/1000);
+			}
+			
+		}
+		else // Recording is now off, so we clear recording text
+		{
+			sprintf(string_t,"        ");
+		}
+		lcd.setCursor(8, 1); //columns, rows
+		lcd.print(string_t);
+		
+		if(Debug)
+		{
+			Serial.print("Record: ");
+			Serial.println(recording);
+			Serial.println(string_t);
+		}
+	}
+	lastButtonState = buttonState;
 }
