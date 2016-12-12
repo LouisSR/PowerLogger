@@ -24,6 +24,7 @@ TODO:
 //Global variables
 const byte cardDetect = 1; // for SD through SPI, we use digital pin 10 for the SD cs line
 const byte record_pin = 5; //Pushbutton to activate the recording
+const byte contrast_pin = 6; //To control the contrast of the LCD
 const char header[] = "Date, Voltage (mV), Current (mA)";
 
 bool Debug = false; //Debug is true if Serial is connected
@@ -45,7 +46,9 @@ LiquidCrystal lcd(12, 11, 10, 9, 8, 7);//RS, Enable, D4:7
 void setup(void)
 {
 	pinMode(record_pin, INPUT_PULLUP);
-	delay(3000);
+	pinMode(contrast_pin, OUTPUT);
+	//digitalWrite(contrast_pin, LOW);
+	analogWrite(contrast_pin, 100); //set contrast of LCD
 	
 	// Init LCD
 	lcd.begin(16, 2); //16 Columns, 2 rows
