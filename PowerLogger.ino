@@ -30,7 +30,7 @@ const char header[] = "Date, Voltage (mV), Current (mA)";
 bool Debug = false; //Debug is true if Serial is connected
 bool recording = false;
 char daysOfTheWeek[7][12] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
-unsigned long log_interval = 2000; // Time between two measurements in ms
+unsigned long log_interval = 10000; // Time between two measurements in ms
 File logfile; // the logging file
 
 //Objects
@@ -52,13 +52,8 @@ void setup(void)
 	
 	// Init LCD
 	lcd.begin(16, 2); //16 Columns, 2 rows
-	lcd.print("PowerLogger");
+	lcd.print("  PowerLogger  ");
 	delay(2000);
-	lcd.clear();
-	lcd.setCursor(5, 0); //columns, rows
-	lcd.print("mA");
-	lcd.setCursor(5, 1); //columns, rows
-	lcd.print("V");
 
 	// Init serial port
 	if(Serial)
@@ -80,7 +75,6 @@ void setup(void)
 		}
 		while (1);
 	}
-	DisplayTime();
 
 	//Init SD
 	SD_setup();
@@ -97,6 +91,14 @@ void setup(void)
 	display_clock.begin(500);
 	time_clock.begin(10000);
 	log_clock.begin(log_interval);
+
+	//Display permanent text
+	lcd.clear();
+	lcd.setCursor(6, 0); //columns, rows
+	lcd.print("mA");
+	lcd.setCursor(6, 1); //columns, rows
+	lcd.print("V");
+	DisplayTime();
 }
 
 /* Initialize SD card, create new log file and save header*/
@@ -166,7 +168,7 @@ void SD_setup(void)
 
 void loop(void)
 {
-	static int voltage = -18000, current = -1234;
+	static int voltage = 18000, current = -200;
 
 	//Measure current and voltage
 	if(measure_clock.isItTime())
@@ -294,19 +296,11 @@ void Display(int voltage, int current)
 	{
 		Serial.print(string_t); Serial.println("mA");
 	}
-	
+
 	//Display voltage
-	if(voltage >= 10000 || voltage <= -10000) // value is too long to print
-	{
-		lcd.setCursor(0, 1); //columns, rows
-		lcd.print("     "); 
-	}
-	else
-	{
-	sprintf(string_t, "% 2d.%1d", voltage/1000, (abs(voltage)%1000)/100); //sprintf on Arduino does not support float number
+	sprintf(string_t, "%3d.%1d", voltage/1000, (abs(voltage)%1000)/100); //sprintf on Arduino does not support float number
 	lcd.setCursor(0, 1); //columns, rows
 	lcd.print(string_t);
-	}
 
 	if(Debug)
 	{
